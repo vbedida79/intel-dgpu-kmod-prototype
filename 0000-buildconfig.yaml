@@ -1,0 +1,71 @@
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  labels:
+    app: intel-dgpu-kmod-driver-container
+  name: intel-dgpu-kmod-driver-container
+  namespace: intel-dgpu-kmod
+spec: {}
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  labels:
+    app: intel-dgpu-kmod-driver-build
+  name: intel-dgpu-kmod-driver-build
+  namespace: intel-dgpu-kmod
+spec:
+  nodeSelector:
+    node-role.kubernetes.io/worker: ""
+  runPolicy: "Serial"
+  triggers:
+    - type: "ConfigChange"
+    - type: "ImageChange"
+  source:
+    dockerfile: |
+      FROM quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:0661d0560654e7e2d1761e883ffdd6c482c8c8f37e60608bb59c44fa81a3f0bb as builder
+
+      WORKDIR /build/
+
+      RUN dnf install -y patch gcc m4 make tar && dnf clean all
+      
+      # install bison
+      ARG BISON_VERSION=3.8
+      ADD http://ftp.gnu.org/gnu/bison/bison-${BISON_VERSION}.tar.gz /bison/
+      RUN tar -xzvf /bison/bison-${BISON_VERSION}.tar.gz -C /bison/ && cd /bison/bison-${BISON_VERSION} && ./configure && make && make install
+
+      # install flex
+      ARG FLEX_VERSION=2.6.4
+      ADD https://github.com/westes/flex/files/981163/flex-${FLEX_VERSION}.tar.gz /flex/
+      RUN tar -xzvf /flex/flex-${FLEX_VERSION}.tar.gz -C /flex/ && cd /flex/flex-${FLEX_VERSION} && ./configure && make && make install
+
+      # build cse driver
+      RUN git clone -b rhel85 https://github.com/Walnux/intel-gpu-cse-backports.git && cd intel-gpu-cse-backports && make && make modules_install
+      # build pmt driver
+      RUN git clone -b rhel85 https://github.com/Walnux/intel-gpu-pmt-backports.git && cd intel-gpu-pmt-backports && make && make modules_install
+      # both dmabuf and i915 build compat/i915-compat.ko since the compat dir is not removed when building i915. it is a problem?
+      # build dmabuf driver
+      RUN git clone -b redhat/main https://github.com/Walnux/intel-gpu-i915-backports.git && cd intel-gpu-i915-backports && patch -p1 < scripts/disable_drm.patch && export LEX=flex; export YACC=bison && cp defconfigs/drm .config &&  make oldconfig && make -j $(nproc) && make modules_install
+      # clean up dambuf building
+      RUN cd intel-gpu-i915-backports && git reset --hard
+
+      # build i915 driver
+      RUN cd intel-gpu-i915-backports && patch -p1 < scripts/disable_dma.patch && export LEX=flex; export YACC=bison && cp defconfigs/i915 .config &&  make oldconfig && make -j $(nproc) && make modules_install
+      # clean up i915 building
+
+      RUN cd intel-gpu-i915-backports && git reset --hard
+      
+      FROM registry.redhat.io/ubi8/ubi-minimal
+
+      RUN microdnf -y install kmod
+
+      COPY --from=builder /etc/driver-toolkit-release.json /etc/
+      COPY --from=builder /lib/modules/4.18.0-305.49.1.el8_4.x86_64/* /lib/modules/4.18.0-305.49.1.el8_4.x86_64/
+
+  strategy:
+    dockerStrategy:
+      buildArgs:
+  output:
+    to:
+      kind: ImageStreamTag
+      name: intel-dgpu-kmod-driver-container:demo
