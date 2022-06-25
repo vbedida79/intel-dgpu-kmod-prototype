@@ -1,0 +1,78 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: intel-dgpu-simple-kmod-prototype
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: intel-dgpu-simple-kmod-prototype
+rules:
+- apiGroups:
+  - security.openshift.io
+  resources:
+  - securitycontextconstraints
+  verbs:
+  - use
+  resourceNames:
+  - privileged
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: intel-dgpu-simple-kmod-prototype
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: intel-dgpu-simple-kmod-prototype
+subjects:
+- kind: ServiceAccount
+  name: intel-dgpu-simple-kmod-prototype
+  namespace: intel-dgpu-kmod
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  labels:
+    app: intel-dgpu-simple-kmod-prototype
+  name: intel-dgpu-simple-kmod-prototype
+  annotations:
+    specialresource.openshift.io/wait: "true"
+    specialresource.openshift.io/state: "driver-container"
+    specialresource.openshift.io/driver-container-vendor: simple-kmod
+    specialresource.openshift.io/kernel-affine: "true"
+spec:
+  updateStrategy:
+    type: OnDelete
+  selector:
+    matchLabels:
+      app: intel-dgpu-simple-kmod-prototype
+  template:
+    metadata:
+      # Mark this pod as a critical add-on; when enabled, the critical add-on scheduler
+      # reserves resources for critical add-on pods so that they can be rescheduled after
+      # a failure.  This annotation works in tandem with the toleration below.
+      annotations:
+        scheduler.alpha.kubernetes.io/critical-pod: ""
+      labels:
+        app: intel-dgpu-simple-kmod-prototype
+    spec:
+      serviceAccount: intel-dgpu-simple-kmod-prototype
+      serviceAccountName: intel-dgpu-simple-kmod-prototype
+      containers:
+      - image: image-registry.openshift-image-registry.svc:5000/intel-dgpu-kmod/intel-dgpu-kmod-driver-container@sha256:ae71de5b098acbf022a6b6a6dc1831a91e64a3c4b368a0f026081d9fdebf684f
+        name: intel-dgpu-simple-kmod-prototype
+        imagePullPolicy: Always
+        command: [sleep, infinity]
+        lifecycle:
+          postStart:
+            exec:
+              command: ["/bin/sh"]
+          preStop:
+            exec:
+              command: ["/bin/sh"]
+        securityContext:
+          privileged: true
+      nodeSelector:
+        intel.feature.node.kubernetes.io/gpu: "true"
+        feature.node.kubernetes.io/kernel-version.full: "4.18.0-305.45.1.el8_4.x86_64"
