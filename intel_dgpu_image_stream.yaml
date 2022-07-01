@@ -1,0 +1,7 @@
+kind: ImageStream
+metadata:
+  labels:
+    app: intel-dgpu-driver-container
+  name: intel-dgpu-driver-container
+  namespace: intel-dgpu
+spec: {}
