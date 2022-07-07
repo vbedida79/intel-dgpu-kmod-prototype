@@ -7,103 +7,76 @@ spec:
         #devicePlugin:
         #image: some-image
         #name: overwritten-anyway
+  serviceAccountName: intel-dgpu-sa
   driverContainer:
     image:
     name: intel-dgpu-driver-container
     securityContext:
       capabilities:
         add: [SYS_MODULE]
+    command: [sleep, infinity]
+    #lifecycle:
+    #  postStart:
+    #    exec:
+    #      command: [modprobe, -vd, /opt, intel-dgpu]
+    #  preStop:
+    #    exec:
+    #     command: [modprobe, -rvd, /opt, intel-dgpu]
   kernelMappings:
-    - literal: 4.18.0-305.45.1.el8_4.x86_64
-      containerImage:  default-route-openshift-image-registry.apps.orjfdciocp.otcdcslab.com/intel-dgpu/intel-dgpu-driver-container:4.18.0-305.45.1.el8_4.x86_64
-      #containerImage: quay.io/ocpeng/intel-dgpu-driver-container:4.18.0-305.45.1.el8_4.x86_64
-      #- regexp: '^.*\.x86_64$'
-      #containerImage: image-registry.openshift-image-registry.svc:5000/intel-dgpu-kmod/intel-dgpu-driver-container:demo
+    #- literal: 4.18.0-305.45.1.el8_4.x86_64
+    - regexp: '^.*\.x86_64$'
+      #containerImage: quay.io/ocpeng/intel-dgpu-driver-container:$KERNEL_FULL_VERSION
+      containerImage: image-registry.openshift-image-registry.svc:5000/intel-dgpu/intel-dgpu-driver-container:$KERNEL_FULL_VERSION
       build:
         buildArgs:
-          - name: SOME_KEY
-            value: SOME_VALUE
+            - name: BISON_VERSION
+              value: "3.8"
+            - name: FLEX_VERSION
+              value: "2.6.4"
         pull:
+          insecureSkipTLSVerify: true
           insecure: true
           secret:
             name: default-dockercfg-s97jv
         push:
+          insecureSkipTLSVerify: true
           insecure: true
           secret:
-            name: kmmo-demo # Service Acccount permission workaround for OCP, manually adding build secret to default SA
+            name: kmmo-demo # Service Account permission workaround for OCP, manually adding build secret to default SA
         dockerfile: |
           FROM image-registry.openshift-image-registry.svc:5000/openshift/driver-toolkit@sha256:57d069fbf5c4ea61bd260e6ea8f94e5f6e7e732a0129ba63bf1642ac910da73a as builder
-          # use KERNEL_VERSION above, hardcode for now
-
-
+          # use KERNEL_VERSION above, hardcoded DTK base image for now
           WORKDIR /build/
-
-
           RUN dnf install -y patch gcc m4 make tar && dnf clean all
-
-
           # install bison
-
-          ARG BISON_VERSION=3.8
-          #RUN echo $BISON_VERSION
-
+          ARG BISON_VERSION
+          RUN echo $BISON_VERSION
           ADD http://ftp.gnu.org/gnu/bison/bison-3.8.tar.gz /bison/
-
           RUN tar -xzvf /bison/bison-3.8.tar.gz -C /bison/ && cd /bison/bison-3.8 && ./configure && make && make install
-
-
           # install flex
-
-          ARG FLEX_VERSION=2.6.4
-
+          ARG FLEX_VERSION
+          RUN echo $FLEX_VERSION
           ADD https://github.com/westes/flex/files/981163/flex-2.6.4.tar.gz /flex/
-
           RUN tar -xzvf /flex/flex-2.6.4.tar.gz -C /flex/ && cd /flex/flex-2.6.4 && ./configure && make && make install
-
-
           # build cse driver
-
           RUN git clone -b rhel85 https://github.com/Walnux/intel-gpu-cse-backports.git && cd intel-gpu-cse-backports && make && make modules_install
-
           # build pmt driver
-
           RUN git clone -b rhel85 https://github.com/Walnux/intel-gpu-pmt-backports.git && cd intel-gpu-pmt-backports && make && make modules_install
-
           # both dmabuf and i915 build compat/i915-compat.ko since the compat dir is not removed when building i915. it is a problem?
-
           # build dmabuf driver
-
           RUN git clone -b redhat/main https://github.com/Walnux/intel-gpu-i915-backports.git && cd intel-gpu-i915-backports && patch -p1 < scripts/disable_drm.patch && export LEX=flex; export YACC=bison && cp defconfigs/drm .config && make oldconfig && make -j $(nproc) && make modules_install
-
           # clean up dambuf building
-
           RUN cd intel-gpu-i915-backports && git reset --hard
-
-
           # build i915 driver
-
           RUN cd intel-gpu-i915-backports && patch -p1 < scripts/disable_dma.patch && export LEX=flex; export YACC=bison && cp defconfigs/i915 .config &&  make oldconfig && make -j $(nproc) && make modules_install
-
           # clean up i915 building
-
           RUN cd intel-gpu-i915-backports && git reset --hard
-
-
           RUN git clone https://github.com/Walnux/intel-gpu-firmware.git
-
-
           FROM registry.redhat.io/ubi8/ubi-minimal
-
-
           RUN microdnf -y install kmod
-
-
           COPY --from=builder /etc/driver-toolkit-release.json /etc/
-
-          COPY --from=builder /lib/modules/4.18.0-305.45.1.el8_4.x86_64/* /opt/lib/modules/4.18.0-305.45.1.el8_4.x86_64/
-
+          COPY --from=builder /lib/modules/$KERNEL_FULL_VERSION/* /opt/lib/modules/$KERNEL_FULL_VERSION/
           COPY --from=builder /build/intel-gpu-firmware/firmware/*.bin /opt/lib/firmware/updates/i915/
-
           RUN depmod -b /opt
   selector:
           intel.feature.node.kubernetes.io/gpu: 'true'
