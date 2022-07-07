@@ -1,0 +1,66 @@
+apiVersion: security.openshift.io/v1
+allowHostDirVolumePlugin: true
+allowHostIPC: false
+allowHostNetwork: false
+allowHostPID: false
+allowHostPorts: false
+allowPrivilegeEscalation: true
+allowPrivilegedContainer: false
+allowedCapabilities:
+- SYS_MODULE
+defaultAddCapabilities: null
+fsGroup:
+  type: RunAsAny
+groups:
+- system:cluster-admins
+kind: SecurityContextConstraints
+metadata:
+  annotations:
+     kubernetes.io/description: 'Security context enabling SYS_MODULE capability for Intel dGPU module CRD'
+  name: intel-dpgu-scc
+readOnlyRootFilesystem: false
+requiredDropCapabilities:
+- MKNOD
+runAsUser:
+  type: RunAsAny
+seLinuxContext:
+  type: MustRunAs
+supplementalGroups:
+  type: RunAsAny
+users: []
+volumes:
+- secret
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: intel-dgpu-sa
+  namespace: intel-dgpu
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: intel-dgpu-role
+  namespace: intel-dgpu
+rules:
+- apiGroups:
+  - security.openshift.io
+  resourceNames:
+  - intel-dpgu-scc
+  resources:
+  - securitycontextconstraints
+  verbs:
+  - use
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: intel-dgpu-role-bind
+  namespace: intel-dgpu
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: intel-dgpu-role
+subjects:
+- kind: ServiceAccount
+  name: intel-dgpu-sa

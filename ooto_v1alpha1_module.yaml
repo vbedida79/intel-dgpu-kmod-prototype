@@ -108,3 +108,4 @@ spec:
   selector:
           intel.feature.node.kubernetes.io/gpu: 'true'
           #feature.node.kubernetes.io/pci-0300_8086.present: "true"
+  serviceAccountName: intel-dgpu-sa
